@@ -15,25 +15,45 @@ const SYSTEM_INSTRUCTION =
   'אל תשתמש בכוכביות, סימני מרקדאון, רשימות ממוספרות או תווים מיוחדים - ' +
   'התשובה תושמע בקול, לא תוצג בכתב.';
 
-async function downloadYemotRecording(recordingPath) {
-  if (!YEMOT_TOKEN) {
-    throw new Error('חסר משתנה סביבה YEMOT_TOKEN');
-  }
-  let path = recordingPath;
+async function downloadFileByPath(rawPath) {
+  let path = rawPath;
   if (!path.includes('ivr2:/')) {
     path = path.replace('ivr2:', 'ivr2:/');
   }
   const url = `https://www.call2all.co.il/ym/api/DownloadFile?token=${encodeURIComponent(YEMOT_TOKEN)}&path=${encodeURIComponent(path)}`;
-  console.log('מנסה להוריד מ-URL:', url.replace(YEMOT_TOKEN, '***HIDDEN***'));
-
   const response = await fetch(url);
   if (!response.ok) {
-    const errBody = await response.text().catch(() => '');
-    console.error('גוף התשובה משגיאת ההורדה:', errBody);
-    throw new Error(`שגיאה בהורדת ההקלטה: ${response.status}`);
+    throw new Error(`404_OR_ERROR_${response.status}`);
   }
   const arrayBuffer = await response.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+async function findLatestRecording(folderPath) {
+  let lastGoodBuffer = null;
+  let lastGoodName = null;
+  let consecutiveFailures = 0;
+
+  for (let i = 0; i < 300; i++) {
+    const num = String(i).padStart(3, '0');
+    const candidatePath = `${folderPath}/${num}.wav`;
+    try {
+      const buf = await downloadFileByPath(candidatePath);
+      lastGoodBuffer = buf;
+      lastGoodName = candidatePath;
+      consecutiveFailures = 0;
+    } catch (e) {
+      consecutiveFailures++;
+      if (lastGoodBuffer) break;
+      if (consecutiveFailures > 3) break;
+    }
+  }
+
+  if (!lastGoodBuffer) {
+    throw new Error('לא נמצאה אף הקלטה בתיקייה: ' + folderPath);
+  }
+  console.log('נמצאה הקלטה אחרונה:', lastGoodName);
+  return lastGoodBuffer;
 }
 
 async function askGeminiText(userText) {
@@ -86,19 +106,19 @@ app.all('/api/talk', async (req, res) => {
   console.log('התקבל מימות:', params);
 
   try {
-    const recordingPath = params.recording_path || '';
+    const apiExtension = String(params.ApiExtension || '');
+    const folderPath = 'ivr2:' + apiExtension.replace(/\/api$/, '');
+
     const userText = params.text || params.hazara || params.ApiPath0 || params.transcript || '';
+
     let aiReply;
 
-    if (recordingPath) {
-      console.log('מוריד הקלטה מהנתיב:', recordingPath);
-      const audioBuffer = await downloadYemotRecording(String(recordingPath));
-      aiReply = await askGeminiAudio(audioBuffer, 'audio/wav');
-    } else if (userText) {
+    if (userText) {
       aiReply = await askGeminiText(String(userText));
     } else {
-      res.type('text/plain').send('read=t-לא שמעתי כלום, אפשר לחזור על זה בבקשה,yes,no,,,no');
-      return;
+      console.log('מחפש הקלטה אחרונה בתיקייה:', folderPath);
+      const audioBuffer = await findLatestRecording(folderPath);
+      aiReply = await askGeminiAudio(audioBuffer, 'audio/wav');
     }
 
     const speech = cleanForYemotSpeech(aiReply);
