@@ -5,75 +5,96 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// המפתח נלקח ממשתנה סביבה (Environment Variable) - לא כתוב בקוד!
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const YEMOT_TOKEN = process.env.YEMOT_TOKEN;
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-// הנחיה קבועה ל-AI: לענות בעברית, קצר, בלי עיצוב, מתאים להשמעה קולית
 const SYSTEM_INSTRUCTION =
   'אתה עוזר קולי טלפוני בעברית. ' +
   'ענה תמיד בעברית, בקצרה (1-3 משפטים לכל היותר), בשפה פשוטה וברורה. ' +
   'אל תשתמש בכוכביות, סימני מרקדאון, רשימות ממוספרות או תווים מיוחדים - ' +
   'התשובה תושמע בקול, לא תוצג בכתב.';
 
-// פונקציה ששולחת את השאלה ל-Gemini ומחזירה את התשובה
-async function askGemini(userText) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('חסר מפתח GEMINI_API_KEY במשתני הסביבה');
+async function downloadYemotRecording(recordingPath) {
+  if (!YEMOT_TOKEN) {
+    throw new Error('חסר משתנה סביבה YEMOT_TOKEN');
   }
+  const path = recordingPath.replace(/^ivr2:/, '');
+  const url = `https://www.call2all.co.il/ym/api/DownloadFile?token=${encodeURIComponent(YEMOT_TOKEN)}&path=${encodeURIComponent(path)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`שגיאה בהורדת ההקלטה: ${response.status}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
 
+async function askGeminiText(userText) {
+  if (!GEMINI_API_KEY) throw new Error('חסר GEMINI_API_KEY');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
   const body = {
     contents: [{ role: 'user', parts: [{ text: userText }] }],
     systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
   };
-
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${errText}`);
-  }
-
+  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
   const data = await response.json();
-  const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  return reply || 'מצטער, לא הצלחתי להבין. אפשר לנסות שוב?';
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'מצטער, לא הצלחתי להבין.';
 }
 
-// ניקוי טקסט כדי שיהיה בטוח להשמעה בפורמט של ימות (בלי פסיקים/שורות חדשות)
+async function askGeminiAudio(audioBuffer, mimeType) {
+  if (!GEMINI_API_KEY) throw new Error('חסר GEMINI_API_KEY');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const base64Audio = audioBuffer.toString('base64');
+  const body = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { inline_data: { mime_type: mimeType, data: base64Audio } },
+        { text: 'זו הקלטה של מתקשר לקו טלפוני. תקשיב למה שהוא אומר ותענה לו ישירות בעברית.' },
+      ],
+    }],
+    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+  };
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+  const data = await response.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'מצטער, לא הצלחתי להבין את ההקלטה.';
+}
+
 function cleanForYemotSpeech(text) {
-  return text
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/,/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return text.replace(/[\r\n]+/g, ' ').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// נקודת הכניסה שממנה ימות המשיח יקרא (api_link בקובץ ext.ini)
-// תומך גם ב-GET וגם ב-POST כי לא תמיד ברור מראש איך ימות שולח
 app.all('/api/talk', async (req, res) => {
   const params = { ...req.query, ...req.body };
   console.log('התקבל מימות:', params);
 
   try {
-    // חיפוש הטקסט המתומלל בפרמטרים הנפוצים - יש להתאים לפי מה שבפועל מגיע
-    const userText =
-      params.text || params.hazara || params.ApiPath0 || params.transcript || '';
+    const recordingPath = params.recording_path || '';
+    const userText = params.text || params.hazara || params.ApiPath0 || params.transcript || '';
+    let aiReply;
 
-    if (!userText) {
+    if (recordingPath) {
+      console.log('מוריד הקלטה:', recordingPath);
+      const audioBuffer = await downloadYemotRecording(String(recordingPath));
+      aiReply = await askGeminiAudio(audioBuffer, 'audio/wav');
+    } else if (userText) {
+      aiReply = await askGeminiText(String(userText));
+    } else {
       res.type('text/plain').send('read=t-לא שמעתי כלום, אפשר לחזור על זה בבקשה,yes,no,,,no');
       return;
     }
 
-    const aiReply = await askGemini(String(userText));
     const speech = cleanForYemotSpeech(aiReply);
-
-    // מחזיר לימות פקודת "read" שתשמיע את הטקסט בקול
     res.type('text/plain').send(`read=t-${speech},yes,no,,,no`);
   } catch (err) {
     console.error('שגיאה:', err.message);
@@ -81,7 +102,6 @@ app.all('/api/talk', async (req, res) => {
   }
 });
 
-// דף בדיקה פשוט - כדי לוודא שהשרת חי
 app.get('/', (req, res) => {
   res.send('שרת ה-AI לקו ימות המשיח פעיל ✅');
 });
