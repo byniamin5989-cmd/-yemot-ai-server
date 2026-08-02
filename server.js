@@ -19,10 +19,17 @@ async function downloadYemotRecording(recordingPath) {
   if (!YEMOT_TOKEN) {
     throw new Error('חסר משתנה סביבה YEMOT_TOKEN');
   }
-  const path = recordingPath.replace(/^ivr2:/, '');
+  let path = recordingPath;
+  if (!path.includes('ivr2:/')) {
+    path = path.replace('ivr2:', 'ivr2:/');
+  }
   const url = `https://www.call2all.co.il/ym/api/DownloadFile?token=${encodeURIComponent(YEMOT_TOKEN)}&path=${encodeURIComponent(path)}`;
+  console.log('מנסה להוריד מ-URL:', url.replace(YEMOT_TOKEN, '***HIDDEN***'));
+
   const response = await fetch(url);
   if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    console.error('גוף התשובה משגיאת ההורדה:', errBody);
     throw new Error(`שגיאה בהורדת ההקלטה: ${response.status}`);
   }
   const arrayBuffer = await response.arrayBuffer();
@@ -84,7 +91,7 @@ app.all('/api/talk', async (req, res) => {
     let aiReply;
 
     if (recordingPath) {
-      console.log('מוריד הקלטה:', recordingPath);
+      console.log('מוריד הקלטה מהנתיב:', recordingPath);
       const audioBuffer = await downloadYemotRecording(String(recordingPath));
       aiReply = await askGeminiAudio(audioBuffer, 'audio/wav');
     } else if (userText) {
