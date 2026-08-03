@@ -127,7 +127,9 @@ app.all('/api/talk', async (req, res) => {
     }
 
     const speech = cleanForYemotSpeech(aiReply);
-    res.type('text/plain').send(`read=t-${speech},yes,no,,,no`);
+    const finalResponse = `read=t-${speech},yes,no,,,no`;
+    console.log('שולח תשובה לימות:', finalResponse);
+    res.type('text/plain').send(finalResponse);
   } catch (err) {
     console.error('שגיאה:', err.message);
     res.type('text/plain').send('read=t-קרתה שגיאה זמנית, נסו שוב בעוד רגע,yes,no,,,no');
