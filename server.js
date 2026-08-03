@@ -103,7 +103,11 @@ async function askGeminiAudio(audioBuffer, mimeType) {
 }
 
 function cleanForYemotSpeech(text) {
-  return text.replace(/[\r\n]+/g, ' ').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[,،.!?;:()"'״׳*_#%^&<>{}[\]|\\~`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 app.all('/api/talk', async (req, res) => {
