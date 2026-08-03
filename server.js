@@ -7,7 +7,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const YEMOT_TOKEN = process.env.YEMOT_TOKEN;
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3-flash-preview';
 
 const SYSTEM_INSTRUCTION =
   'אתה עוזר קולי טלפוני בעברית. ' +
