@@ -127,7 +127,7 @@ app.all('/api/talk', async (req, res) => {
     }
 
     const speech = cleanForYemotSpeech(aiReply);
-    const finalResponse = `read=t-${speech},yes,no,,,no`;
+    const finalResponse = `id_list_message=t-${speech}`;
     console.log('שולח תשובה לימות:', finalResponse);
     res.type('text/plain').send(finalResponse);
   } catch (err) {
