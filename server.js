@@ -21,6 +21,7 @@ async function downloadFileByPath(rawPath) {
     path = path.replace('ivr2:', 'ivr2:/');
   }
   const url = `https://www.call2all.co.il/ym/api/DownloadFile?token=${encodeURIComponent(YEMOT_TOKEN)}&path=${encodeURIComponent(path)}`;
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`404_OR_ERROR_${response.status}`);
@@ -92,7 +93,11 @@ async function askGeminiAudio(audioBuffer, mimeType) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    console.error('פירוט שגיאת Gemini (אודיו):', response.status, errBody);
+    throw new Error(`Gemini error: ${response.status}`);
+  }
   const data = await response.json();
   return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'מצטער, לא הצלחתי להבין את ההקלטה.';
 }
